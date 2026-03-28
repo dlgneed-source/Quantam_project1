@@ -5,6 +5,7 @@ import {
   Key, Plus, Trash2, Copy, Eye, EyeOff, RefreshCw, MessageSquareText, 
   Settings2, Download, Maximize2, Sparkle, History, Check
 } from 'lucide-react';
+import { generateAi } from '@/lib/backend';
 
 const textModels = [
   { id: 'llama3', name: 'Llama 3.3 70B Instruct', cost: '15 credits/req' },
@@ -44,6 +45,9 @@ const AIToolsHub: React.FC = () => {
   const [apiKeys, setApiKeys] = useState(dummyApiKeys);
   const [showKeyId, setShowKeyId] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedOutput, setGeneratedOutput] = useState('');
+  const [generationError, setGenerationError] = useState('');
 
   const creditsUsed = 8450;
   const creditsTotal = 10000;
@@ -59,6 +63,29 @@ const AIToolsHub: React.FC = () => {
   const addKey = () => {
     const newKey = { id: `ak_${Date.now()}`, name: `Key ${apiKeys.length + 1}`, key: `sk-new-****...${Math.random().toString(36).slice(-4)}`, created: new Date().toISOString().split('T')[0], status: 'active' as const };
     setApiKeys([...apiKeys, newKey]);
+  };
+
+  const handleGenerate = async () => {
+    const cleanPrompt = prompt.trim();
+    if (!cleanPrompt || isGenerating) return;
+    setGenerationError('');
+    setIsGenerating(true);
+
+    try {
+      const model = activeMode === 'text' ? selectedTextModel : selectedImageModel;
+      const result = await generateAi({
+        mode: activeMode,
+        prompt: cleanPrompt,
+        model,
+        systemPrompt: activeMode === 'text' ? systemPrompt : undefined,
+        temperature: activeMode === 'text' ? temperature : undefined,
+      });
+      setGeneratedOutput(result.result);
+    } catch (error) {
+      setGenerationError(error instanceof Error ? error.message : 'Generation failed');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   return (
@@ -202,13 +229,14 @@ const AIToolsHub: React.FC = () => {
                 className="w-full rounded-xl bg-black/50 border border-white/10 px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-primary/50 resize-none transition-colors mb-4 shadow-inner"
               />
               <button 
-                disabled={!prompt.trim()}
+                onClick={handleGenerate}
+                disabled={!prompt.trim() || isGenerating}
                 className={`w-full py-3.5 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed ${
                   activeMode === 'text' ? 'bg-indigo-500 hover:bg-indigo-600 text-white' : 'bg-fuchsia-500 hover:bg-fuchsia-600 text-white'
                 }`}
               >
                 <Zap className="w-4 h-4" />
-                {activeMode === 'text' ? 'Generate Response' : 'Generate Image'}
+                {isGenerating ? 'Generating...' : activeMode === 'text' ? 'Generate Response' : 'Generate Image'}
               </button>
             </div>
             
@@ -230,17 +258,29 @@ const AIToolsHub: React.FC = () => {
                 </div>
               </div>
 
-              {/* Empty State Canvas */}
-              <div className="flex-1 p-6 flex flex-col items-center justify-center text-center bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-white/[0.02] to-transparent">
-                <div className={`w-16 h-16 rounded-3xl flex items-center justify-center mb-4 border ${activeMode === 'text' ? 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400' : 'bg-fuchsia-500/10 border-fuchsia-500/20 text-fuchsia-400'}`}>
-                  {activeMode === 'text' ? <Sparkle className="w-8 h-8" /> : <ImageIcon className="w-8 h-8" />}
-                </div>
-                <p className="text-base font-bold text-zinc-200">Engine Ready</p>
-                <p className="text-sm text-zinc-500 mt-2 max-w-sm">
-                  {activeMode === 'text' 
-                    ? "Enter a prompt and adjust parameters to start synthesizing text with LLMs." 
-                    : "Describe your vision to generate high-fidelity images using Flux models."}
-                </p>
+              <div className="flex-1 p-6 flex flex-col bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-white/[0.02] to-transparent">
+                {generationError ? (
+                  <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                    {generationError}
+                  </div>
+                ) : null}
+                {generatedOutput ? (
+                  <div className="h-full overflow-y-auto rounded-xl border border-white/10 bg-black/40 p-4 text-sm text-zinc-200 whitespace-pre-wrap">
+                    {generatedOutput}
+                  </div>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center text-center">
+                    <div className={`w-16 h-16 rounded-3xl flex items-center justify-center mb-4 border ${activeMode === 'text' ? 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400' : 'bg-fuchsia-500/10 border-fuchsia-500/20 text-fuchsia-400'}`}>
+                      {activeMode === 'text' ? <Sparkle className="w-8 h-8" /> : <ImageIcon className="w-8 h-8" />}
+                    </div>
+                    <p className="text-base font-bold text-zinc-200">Engine Ready</p>
+                    <p className="text-sm text-zinc-500 mt-2 max-w-sm">
+                      {activeMode === 'text' 
+                        ? "Enter a prompt and adjust parameters to start synthesizing text with LLMs." 
+                        : "Describe your vision to generate high-fidelity images using Flux models."}
+                    </p>
+                  </div>
+                )}
               </div>
 
             </div>

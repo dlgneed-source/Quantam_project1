@@ -5,11 +5,12 @@ import {
   Users, Wallet, X, Pin, User, Paperclip, Crown
 } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { socket } from '@/lib/socket';
 
 /* ━━━ Data Models ━━━ */
 type Room = { id: string; name: string; unread: number; isVip: boolean; description?: string; icon?: 'hash' | 'pin' | 'lock'; };
 type Contact = { id: string; name: string; initials: string; online: boolean; role: string; wallet: string; lastMsg: string; badge?: string; };
-interface Msg { id: number; roomId: string; user: string; initials: string; text: string; time: string; isOwn?: boolean; userId?: string; role?: string; wallet?: string; replyToId?: number; }
+interface Msg { id: number | string; roomId: string; user: string; initials: string; text: string; time: string; isOwn?: boolean; userId?: string; role?: string; wallet?: string; replyToId?: number | string; }
 type Profile = { id: string; name: string; initials: string; online?: boolean; role?: string; wallet?: string; subtitle?: string; badge?: string; };
 
 const seedRooms: Room[] = [
@@ -69,6 +70,7 @@ const CommunityLounge: React.FC = () => {
   const activeDMObj = selectedDM ? dmContacts.find((c) => c.id === selectedDM) ?? null : null;
   const activeTitle = selectedDM ? activeDMObj?.name ?? 'Direct Message' : activeRoom?.name ?? 'announcements';
   const activeDescription = selectedDM ? `${activeDMObj?.role} • ${activeDMObj?.wallet}` : activeRoom?.description ?? 'Community space';
+  const selectedTargetRoomId = selectedDM ? `dm:${selectedDM}` : selectedRoomId;
 
   const activeChannelMessages = useMemo(() => {
     const base = messages.filter((m) => m.roomId === (selectedDM ? `dm:${selectedDM}` : selectedRoomId));
@@ -78,6 +80,28 @@ const CommunityLounge: React.FC = () => {
   }, [messages, selectedRoomId, selectedDM, searchQuery]);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [activeChannelMessages, mobileShowChat]);
+  useEffect(() => {
+    socket.connect();
+    return () => {
+      socket.off('chat:message');
+      socket.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    socket.emit('chat:join', { roomId: selectedTargetRoomId });
+  }, [selectedTargetRoomId]);
+
+  useEffect(() => {
+    const onMessage = (incoming: Msg) => {
+      const normalized = incoming.userId === 'you' ? { ...incoming, isOwn: true, role: 'You', wallet: '—' } : incoming;
+      setMessages((prev) => (prev.some((m) => String(m.id) === String(normalized.id)) ? prev : [...prev, normalized]));
+    };
+    socket.on('chat:message', onMessage);
+    return () => {
+      socket.off('chat:message', onMessage);
+    };
+  }, []);
 
   const openProfile = (profile: Profile) => { setProfileTarget(profile); setShowUserProfileModal(true); };
 
@@ -97,8 +121,18 @@ const CommunityLounge: React.FC = () => {
 
   const send = () => {
     if (!input.trim()) return;
-    const targetRoomId = selectedDM ? `dm:${selectedDM}` : selectedRoomId;
-    setMessages((prev) => [...prev, { id: Date.now(), roomId: targetRoomId, user: 'You', initials: 'YO', text: input.trim(), time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), isOwn: true, userId: 'you', role: 'You', wallet: '—', replyToId: replyTo?.id }]);
+    const targetRoomId = selectedTargetRoomId;
+    if (socket.connected) {
+      socket.emit('chat:send', {
+        roomId: targetRoomId,
+        text: input.trim(),
+        user: 'You',
+        initials: 'YO',
+        userId: 'you',
+      });
+    } else {
+      setMessages((prev) => [...prev, { id: Date.now(), roomId: targetRoomId, user: 'You', initials: 'YO', text: input.trim(), time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), isOwn: true, userId: 'you', role: 'You', wallet: '—', replyToId: replyTo?.id }]);
+    }
     setInput(''); setReplyTo(null);
   };
 
@@ -247,8 +281,8 @@ const CommunityLounge: React.FC = () => {
                 </div>
                 {msg.replyToId && (
                    <div className="mb-2 rounded-r-lg border-l-2 border-primary/50 bg-white/[0.03] px-3 py-1.5 text-[11px] text-muted-foreground">
-                     Replying to <span className="font-semibold text-primary">{activeChannelMessages.find(m => m.id === msg.replyToId)?.user}</span>
-                   </div>
+                     Replying to <span className="font-semibold text-primary">{activeChannelMessages.find(m => String(m.id) === String(msg.replyToId))?.user}</span>
+                    </div>
                 )}
                 <div className={`relative rounded-2xl px-4 py-3 text-[14px] leading-relaxed shadow-sm transition-all ${msg.isOwn ? 'rounded-tr-sm bg-primary text-white shadow-[0_2px_15px_rgba(217,70,239,0.3)]' : 'rounded-tl-sm border border-white/[0.08] bg-white/[0.05] text-foreground/90 backdrop-blur-md'}`}>
                   {msg.text}
